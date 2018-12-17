@@ -87,16 +87,14 @@ class GradePoster(object):
         print("Giving up.")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("USAGE: python filler.py graded-with-rubric.csv")
+    if len(sys.argv) < 4:
+        print("USAGE: python filler.py graded-with-rubric.csv course_id \
+                assignment_id")
         sys.exit(1)
-    COURSE_ID = "1584732"
-
-    # lab07 for CS 101 F18
-    ASSIGNMENT_ID = "9810058"
+    COURSE_ID = sys.argv[2]
+    ASSIGNMENT_ID = sys.argv[3]
 
     # Test Student for CS 101 F18
-    student_id = "5587357"
     gp = GradePoster(COURSE_ID, ASSIGNMENT_ID, CANVAS_KEY)
     with open(sys.argv[1], encoding='utf-8-sig', newline='') as csvfile:
         reader = csv.DictReader(csvfile)
@@ -105,5 +103,5 @@ if __name__ == "__main__":
             crit_grade_comments = {}
             for item in filter(lambda x: x != "SID", row):
                 crit_grade_comments[item] = {"points": row[item]}
-            response = gp.post_grade_update(student_id, crit_grade_comments)
+            response = gp.post_grade_update(sid, crit_grade_comments)
             print(response.read())
