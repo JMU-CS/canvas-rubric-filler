@@ -20,6 +20,7 @@ import functools
 CANVAS_KEY = os.getenv("CANVAS_KEY")
 CANVAS_URL = os.getenv("CANVAS_URL")
 SID = "SID"
+HTTP_SUCCESS = 200
 
 
 # https://stackoverflow.com/a/4014164/1449799
@@ -85,8 +86,6 @@ class GradePoster(object):
         self.key = key
 
     def post_grade_update(self, student_id, crit_grade_comments):
-        print("crit_grade_comments", student_id)
-        print(crit_grade_comments)
         url_string = ("{}api/v1/courses/{}"
                       "/assignments/{}/submissions")
         url = url_string.format(CANVAS_URL, self.course_id, self.assignment_id)
@@ -104,8 +103,6 @@ class GradePoster(object):
 
         form_data = recursive_urlencode(form_data)
         data = str.encode(form_data)
-        print("data, url")
-        print(data, url)
         header = {"Authorization": "Bearer {}".format(self.key)}
         request = urllib.request.Request(url, data, headers=header,
                                          method="PUT")
@@ -113,15 +110,13 @@ class GradePoster(object):
 
         while attempt_count < 4:
             try:
-                print(crit_grade_comments)
-                print(form_data)
                 return urlopen(request)
             except urllib.error.URLError as e:
-                print(student_id + " URL ERROR, trying again " + str(e) +
+                if VERBOSE:
+                    print(student_id + " URL ERROR, trying again " + str(e) +
                       e.reason)
                 time.sleep(.5)
                 attempt_count += 1
-        print("Giving up.")
 
 if __name__ == "__main__":
 
@@ -140,6 +135,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "csv", help="csv file with header: SID, crit1_id, crit2_id...",
         nargs="?", default=None)
+    parser.add_argument("--verbose", help="increase output verbosity",
+                        action="store_true")
     args = parser.parse_args()
     if CANVAS_KEY is None:
         if args.canvas_key is None:
@@ -162,18 +159,17 @@ if __name__ == "__main__":
     criteria = get_rubric_info(COURSE_ID, ASSIGNMENT_ID)
     expected = csv_expected_format(criteria)
 
+    VERBOSE = args.verbose
     if args.csv is None:
         message = "given that the assignment with id: {} has a rubric with \
 criteria: {}\nthe csv is expected to have exactly the {} following columns (\
 and header): {}".format(ASSIGNMENT_ID, criteria, len(expected),
                         ",".join(expected))
-        print(message)
         sys.exit(0)
     else:
         successes = []
         failures = []
 
-        print(COURSE_ID, ASSIGNMENT_ID, CANVAS_KEY, CANVAS_URL)
         gp = GradePoster(COURSE_ID, ASSIGNMENT_ID, CANVAS_KEY)
         with open(args.csv, encoding='utf-8-sig', newline='') as csvfile:
             reader = csv.DictReader(csvfile)
@@ -183,14 +179,30 @@ and header): {}".format(ASSIGNMENT_ID, criteria, len(expected),
                 print(valid["message"])
                 sys.exit(0)
             else:
-                successes = []
-                failures = []
+                successes = {}
+                failures = {}
                 for row in reader:
                     sid = row[SID]
                     crit_grade_comments = {}
                     for item in filter(lambda x: x != SID, row):
                         crit_grade_comments[item] = {"points": row[item]}
                     response = gp.post_grade_update(sid, crit_grade_comments)
-                    if response is not None:
-                        print(response.getcode())
-                        print(response.read())
+                    if response is not None and \
+                       response.getcode() == HTTP_SUCCESS:
+                        successes[sid] = crit_grade_comments
+                    else:
+                        failures[sid] = crit_grade_comments
+
+                success_count = len(successes.keys())
+                suffix = "es"
+                if success_count > 0:
+                    if success_count == 1:
+                        suffix = ""
+                    print(success_count, "success" + suffix)
+
+                failure_count = len(failures.keys())
+                suffix = "s"
+                if failure_count > 0:
+                    if failure_count == 1:
+                        suffix = ""
+                    print(failure_count, " failure" + suffix, ": ", failures)
