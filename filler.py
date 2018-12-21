@@ -16,42 +16,13 @@ import csv
 import argparse
 import canvasapi
 import functools
+import json
+import requests
 
 CANVAS_KEY = os.getenv("CANVAS_KEY")
 CANVAS_URL = os.getenv("CANVAS_URL")
 SID = "SID"
 HTTP_SUCCESS = 200
-
-
-# https://stackoverflow.com/a/4014164/1449799
-def recursive_urlencode(d):
-    """URL-encode a multidimensional dictionary.
-
-    >>> data = {'a': 'b&c', 'd': {'e': {'f&g': 'h*i'}}, 'j': 'k'}
-    >>> recursive_urlencode(data)
-    u'a=b%26c&j=k&d[e][f%26g]=h%2Ai'
-    """
-    def recursion(d, base=[]):
-        pairs = []
-
-        for key, value in d.items():
-            new_base = base + [key]
-            if hasattr(value, 'values'):
-                pairs += recursion(value, new_base)
-            else:
-                new_pair = None
-                if len(new_base) > 1:
-                    first = urllib.parse.quote(new_base.pop(0))
-                    rest = map(lambda x: urllib.parse.quote(x), new_base)
-                    new_pair = "%s[%s]=%s" % (first, ']['.join(
-                        rest), urllib.parse.quote(str(value)))
-                else:
-                    new_pair = "%s=%s" % (urllib.parse.quote(
-                        str(key)), urllib.parse.quote(str(value)))
-                pairs.append(new_pair)
-        return pairs
-
-    return '&'.join(recursion(d))
 
 
 def get_rubric_info(course_id, assignment_id):
@@ -65,17 +36,6 @@ def get_rubric_info(course_id, assignment_id):
 
 def csv_expected_format(criteria_id):
     return [SID]+[elem[2] for elem in criteria_id]
-
-
-def validate_fields(expected, actual):
-    message = "invalid csv headers. expected: {}, but got: {}".format(
-            expected, actual)
-    valid = len(expected) == len(actual) and \
-        functools.reduce(lambda x, y: x and y[0] == y[1],
-                         list(zip(expected, actual)), True)
-    if valid:
-        message = None
-    return {"valid": valid, "message": message}
 
 
 class GradePoster(object):
@@ -100,23 +60,10 @@ class GradePoster(object):
                     len(crit_grade_comments[crit]["comment"]) > 0:
                 form_data['rubric_assessment'][crit]["comments"] = \
                     crit_grade_comments[crit]["comment"]
-
-        form_data = recursive_urlencode(form_data)
-        data = str.encode(form_data)
+        data = str.encode(json.dumps(form_data))
         header = {"Authorization": "Bearer {}".format(self.key)}
-        request = urllib.request.Request(url, data, headers=header,
-                                         method="PUT")
-        attempt_count = 0
+        return requests.put(url, data, headers=header)
 
-        while attempt_count < 4:
-            try:
-                return urlopen(request)
-            except urllib.error.URLError as e:
-                if VERBOSE:
-                    print(student_id + " URL ERROR, trying again " + str(e) +
-                      e.reason)
-                time.sleep(.5)
-                attempt_count += 1
 
 if __name__ == "__main__":
 
@@ -143,15 +90,16 @@ if __name__ == "__main__":
             print("your canvas key must be defined either in you environment \
                    as CANVAS_KEY or as the first command line argument")
             sys.exit(1)
-        else:
-            CANVAS_KEY = args.canvas_key
+
+        CANVAS_KEY = args.canvas_key
+
     if CANVAS_URL is None:
         if args.canvas_url is None:
             print("your canvas url must be defined either in you environment \
                    as CANVAS_URL or as the second command line argument")
             sys.exit(1)
-        else:
-            CANVAS_URL = args.canvas_url
+
+        CANVAS_URL = args.canvas_url
 
     COURSE_ID = int(args.course)
     ASSIGNMENT_ID = int(args.assignment)
@@ -164,48 +112,49 @@ if __name__ == "__main__":
         message = "given that the assignment with id: {} has a rubric with \
 criteria: {}\nthe csv is expected to have exactly the {} following columns (\
 and header):\n{}".format(ASSIGNMENT_ID, criteria, len(expected),
-                        ",".join(expected))
+                         ",".join(expected))
         print(message)
         sys.exit(0)
-    else:
-        successes = []
-        failures = []
+    
+    successes = []
+    failures = []
 
-        gp = GradePoster(COURSE_ID, ASSIGNMENT_ID, CANVAS_KEY)
-        with open(args.csv, encoding='utf-8-sig', newline='') as csvfile:
-            reader = csv.DictReader(csvfile)
-            fields = reader.fieldnames
-            valid = validate_fields(fields, expected)
-            if not valid["valid"]:
-                print(valid["message"])
-                sys.exit(0)
-            else:
-                successes = {}
-                failures = {}
-                for row in reader:
-                    sid = row[SID]
-                    crit_grade_comments = {}
-                    for item in filter(lambda x: x != SID, row):
-                        crit_grade_comments[item] = {"points": row[item]}
-                    response = gp.post_grade_update(sid, crit_grade_comments)
-                    if response is not None and \
-                       response.getcode() == HTTP_SUCCESS:
-                        if VERBOSE:
-                            print(response)
-                        successes[sid] = crit_grade_comments
-                    else:
-                        failures[sid] = crit_grade_comments
+    gp = GradePoster(COURSE_ID, ASSIGNMENT_ID, CANVAS_KEY)
+    with open(args.csv, encoding='utf-8-sig', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        fields = reader.fieldnames
+        if not set(expected) == set(fields):
+            message = "invalid csv headers. expected: {}, but got: {}".format(
+                expected, actual)
+            print(message)
+            sys.exit(0)
 
-                success_count = len(successes.keys())
-                suffix = "es"
-                if success_count > 0:
-                    if success_count == 1:
-                        suffix = ""
-                    print(success_count, "success" + suffix)
+        successes = {}
+        failures = {}
+        for row in reader:
+            sid = row[SID]
+            crit_grade_comments = {}
+            for item in filter(lambda x: x != SID, row):
+                crit_grade_comments[item] = {"points": row[item]}
+            response = gp.post_grade_update(sid, crit_grade_comments)
+            if response.ok:
+                if VERBOSE:
+                    print(response)
+                successes[sid] = crit_grade_comments
+            else:  # failure case
+                crit_grade_comments["error_message"] = response
+                failures[sid] = crit_grade_comments
 
-                failure_count = len(failures.keys())
-                suffix = "s"
-                if failure_count > 0:
-                    if failure_count == 1:
-                        suffix = ""
-                    print(failure_count, " failure" + suffix, ": ", failures)
+        success_count = len(successes.keys())
+        suffix = "es"
+        if success_count > 0:
+            if success_count == 1:
+                suffix = ""
+            print(success_count, "success" + suffix)
+
+        failure_count = len(failures.keys())
+        suffix = "s"
+        if failure_count > 0:
+            if failure_count == 1:
+                suffix = ""
+            print(failure_count, " failure" + suffix, ": ", failures)
