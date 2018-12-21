@@ -163,8 +163,9 @@ if __name__ == "__main__":
     if args.csv is None:
         message = "given that the assignment with id: {} has a rubric with \
 criteria: {}\nthe csv is expected to have exactly the {} following columns (\
-and header): {}".format(ASSIGNMENT_ID, criteria, len(expected),
+and header):\n{}".format(ASSIGNMENT_ID, criteria, len(expected),
                         ",".join(expected))
+        print(message)
         sys.exit(0)
     else:
         successes = []
@@ -189,6 +190,8 @@ and header): {}".format(ASSIGNMENT_ID, criteria, len(expected),
                     response = gp.post_grade_update(sid, crit_grade_comments)
                     if response is not None and \
                        response.getcode() == HTTP_SUCCESS:
+                        if VERBOSE:
+                            print(response)
                         successes[sid] = crit_grade_comments
                     else:
                         failures[sid] = crit_grade_comments
