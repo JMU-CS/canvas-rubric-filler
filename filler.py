@@ -18,6 +18,7 @@ import canvasapi
 import functools
 import json
 import requests
+import os
 
 SID = "SID"
 HTTP_SUCCESS = 200
@@ -117,18 +118,16 @@ and header):\n{}".format(self.assignment_id, criteria, len(expected),
 
 
 def main():
-    CANVAS_KEY = os.getenv("CANVAS_KEY")
-    CANVAS_URL = os.getenv("CANVAS_URL")
-
     parser = argparse.ArgumentParser()
-    if CANVAS_KEY is None:
-        parser.add_argument(
-            "canvas_key", help="your canvas account token. see: https://canvas.instructure.com/doc/api/file.oauth.html#manual-token-generation")
+    parser.add_argument(
+        "--canvas_key",
+        default=None,
+        help="your canvas account token. see: https://canvas.instructure.com/doc/api/file.oauth.html#manual-token-generation")
 
-    if CANVAS_URL is None:
-        parser.add_argument(
-            "canvas_url", help="the URL of your canvas instance, e.g. \
-                                https://canvas.jmu.edu/")
+    parser.add_argument(
+        "--canvas_url",
+        default=None,
+        help="the URL of your canvas instance, e.g. https://canvas.jmu.edu/")
 
     parser.add_argument("course", help="canvas course id")
     parser.add_argument("assignment", help="canvas assignment id")
@@ -138,27 +137,60 @@ def main():
     parser.add_argument("--verbose", help="increase output verbosity",
                         action="store_true")
     args = parser.parse_args()
-    if CANVAS_KEY is None:
-        if args.canvas_key is None:
-            print("your canvas key must be defined either in you environment \
-                   as CANVAS_KEY or as the first command line argument")
-            sys.exit(1)
+    canvas_key = None
+    canvas_url = None
+    canvas_info_path = os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "canvas_info.txt")
 
-        CANVAS_KEY = args.canvas_key
+    canvas_key = args.canvas_key
+    canvas_url = args.canvas_url
+    
+    if canvas_key is None or canvas_url is None:
+        file_canvas_key = None
+        file_canvas_url = None
+        if os.path.isfile(canvas_info_path):
+            with open(canvas_info_path) as f:
+                try: 
+                    file_canvas_key = next(f).strip()
+                    file_canvas_url = next(f).strip()
+                except Exception as e:
+                    print("expected the file to be better, sad face.")
+            if args.canvas_key is None:
+                # get the constants file
+                if file_canvas_key is not None:
+                    canvas_key = file_canvas_key
+            if args.canvas_url is None:
+                # get the constants file
+                if file_canvas_url is not None:
+                    canvas_url = file_canvas_url
+        if canvas_key is None:
+            canvas_key = os.getenv("CANVAS_KEY")
+        if canvas_url is None:
+            canvas_url = os.getenv("CANVAS_URL")
 
-    if CANVAS_URL is None:
-        if args.canvas_url is None:
-            print("your canvas url must be defined either in you environment \
-                   as CANVAS_URL or as the second command line argument")
-            sys.exit(1)
+    if canvas_key is None:
+        print("Could not determine your CANVAS_KEY. Looked for (1) \
+commandline argument --canvas_key, (2) 1st line in {}, \
+(3) environment variable named CANVAS_KEY".format(canvas_info_path))
+        sys.exit(1)
 
-        CANVAS_URL = args.canvas_url
+    if canvas_url is None:
+        print("Could not determine your CANVAS_URL. Looked for (1) \
+commandline argument --canvas_url, (2) 2nd line in {}, \
+(3) environment variable named CANVAS_URL".format(canvas_info_path))
+        sys.exit(1)
 
-    COURSE_ID = int(args.course)
-    ASSIGNMENT_ID = int(args.assignment)
+    course_id = int(args.course)
+    assignment_id = int(args.assignment)
     VERBOSE = args.verbose
 
-    gp = GradePoster(CANVAS_URL, CANVAS_KEY, COURSE_ID, ASSIGNMENT_ID, args.csv)
+    gp = GradePoster(
+        canvas_url,
+        canvas_key,
+        course_id,
+        assignment_id,
+        args.csv)
     gp.post_all()
 
 if __name__ == "__main__":
