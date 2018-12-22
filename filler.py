@@ -4,21 +4,14 @@
 Given a properly-formatted csv file, post rubric entries to Canvas gradebook.
 """
 
-import os
-import sys
-import urllib
-import time
-import urllib.request
-import urllib.error
-from urllib.request import urlopen
-import urllib.parse
-import csv
 import argparse
 import canvasapi
-import functools
+import csv
 import json
-import requests
 import os
+import requests
+import sys
+import time
 
 SID = "SID"
 HTTP_SUCCESS = 200
@@ -34,6 +27,8 @@ class GradePoster(object):
         self.course_id = course_id
         self.assignment_id = assignment_id
         self.csv = csv_path
+        self.successes = {}
+        self.failures = {}
 
         criteria = self.get_rubric_info(self.course_id, self.assignment_id)
         expected = self.csv_expected_format(criteria)
@@ -65,9 +60,18 @@ and header):\n{}".format(self.assignment_id, criteria, len(expected),
     def csv_expected_format(self, criteria_id):
         return [SID]+[elem[2] for elem in criteria_id]
 
+    def status_message(self):
+        plural_success = {False: "", True: "es"}
+        plural_failure = {False: "", True: "s"}
+        success_count = len(self.successes.keys())
+        failure_count = len(self.failures.keys())
+        return "{} success{} and {} failure{}".format(
+            str(success_count).rjust(6),
+            plural_success[success_count != 1],
+            str(failure_count).rjust(6),
+            plural_failure[failure_count != 1])
+
     def post_all(self):
-        successes = {}
-        failures = {}
         for row in self.dict_reader:
             sid = row[SID]
             crit_grade_comments = {}
@@ -77,24 +81,28 @@ and header):\n{}".format(self.assignment_id, criteria, len(expected),
             if response.ok:
                 if VERBOSE:
                     print(response)
-                successes[sid] = crit_grade_comments
+                self.successes[sid] = crit_grade_comments
             else:  # failure case
                 crit_grade_comments["error_message"] = response
-                failures[sid] = crit_grade_comments
+                self.failures[sid] = crit_grade_comments
+            sys.stdout.write('\r'+str(self.status_message()).ljust(60))
+            sys.stdout.flush()
+        sys.stdout.write('\r')
+        sys.stdout.flush()
 
-        success_count = len(successes.keys())
+        success_count = len(self.successes.keys())
         suffix = "es"
         if success_count > 0:
             if success_count == 1:
                 suffix = ""
             print(success_count, "success" + suffix)
 
-        failure_count = len(failures.keys())
+        failure_count = len(self.failures.keys())
         suffix = "s"
         if failure_count > 0:
             if failure_count == 1:
                 suffix = ""
-            print(failure_count, " failure" + suffix, ": ", failures)
+            print(failure_count, " failure" + suffix, ": ", self.failures)
 
     def post_grade_update(self, student_id, crit_grade_comments):
         url_string = ("{}api/v1/courses/{}"
