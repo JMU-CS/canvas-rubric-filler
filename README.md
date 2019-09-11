@@ -23,6 +23,7 @@ The headers of the csv should be:
 **note: if you simply run the script without `student_rubric_values.csv`, it will print the expected headers automatically**
 
 1. SID
+    * ***THIS IS THE STUDENT'S NUMERICAL CANVAS ID***, which you can get from a canvas gradebook export.
 2. ...The Rubric Criteria IDs 
     * these can come from the rubric page.  e.g. https://canvas.jmu.edu/courses/1584732/rubrics/687658
     inspect the table to get the criteria ids

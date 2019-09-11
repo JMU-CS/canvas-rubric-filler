@@ -30,13 +30,14 @@ class GradePoster(object):
         self.successes = {}
         self.failures = {}
 
-        criteria = self.get_rubric_info(self.course_id, self.assignment_id)
-        expected = self.csv_expected_format(criteria)
+        self.criteria = self.get_rubric_info(self.course_id, self.assignment_id)
+        self.crit_dict = {}
+        expected = self.csv_expected_format(self.criteria)
 
         if self.csv is None:
             print("given that the assignment with id: {} has a rubric with \
 criteria: {}\nthe csv is expected to have exactly the {} following columns (\
-and header):\n{}".format(self.assignment_id, criteria, len(expected),
+and header):\n{}".format(self.assignment_id, self.criteria, len(expected),
                          ",".join(expected)))
             sys.exit(0)
 
@@ -45,7 +46,7 @@ and header):\n{}".format(self.assignment_id, criteria, len(expected),
         fields = self.dict_reader.fieldnames
         if not set(expected) == set(fields):
             message = "invalid csv headers. expected: {}, but got: {}".format(
-                expected, actual)
+                expected, fields)
             print(message)
             sys.exit(0)
 
@@ -54,7 +55,7 @@ and header):\n{}".format(self.assignment_id, criteria, len(expected),
         course = canvas.get_course(course_id)
         assignment = course.get_assignment(assignment_id)
         criteria_id = [[criterion["description"], criterion["points"],
-                        criterion["id"]] for criterion in assignment.rubric]
+                        criterion["id"], criterion["ratings"]] for criterion in assignment.rubric]
         return criteria_id
 
     def csv_expected_format(self, criteria_id):
@@ -66,12 +67,13 @@ and header):\n{}".format(self.assignment_id, criteria, len(expected),
         success_count = len(self.successes.keys())
         failure_count = len(self.failures.keys())
         return "{} success{} and {} failure{}".format(
-            str(success_count).rjust(6),
+            str(success_count),
             plural_success[success_count != 1],
-            str(failure_count).rjust(6),
+            str(failure_count),
             plural_failure[failure_count != 1])
 
     def post_all(self):
+        global VERBOSE
         for row in self.dict_reader:
             sid = row[SID]
             crit_grade_comments = {}
@@ -80,7 +82,8 @@ and header):\n{}".format(self.assignment_id, criteria, len(expected),
             response = self.post_grade_update(sid, crit_grade_comments)
             if response.ok:
                 if VERBOSE:
-                    print(response)
+                    print("RESPONSE:")
+                    print(response.text)
                 self.successes[sid] = crit_grade_comments
             else:  # failure case
                 crit_grade_comments["error_message"] = response
@@ -113,15 +116,18 @@ and header):\n{}".format(self.assignment_id, criteria, len(expected),
         url += "/{}"
         url = url.format(student_id)
         for crit in crit_grade_comments:
+            pts = crit_grade_comments[crit]["points"]
+            flt_pts = float(pts)
             form_data['rubric_assessment'][crit] = {
-                "points": crit_grade_comments[crit]["points"]
+                "points": flt_pts
             }
             if "comment" in crit_grade_comments[crit] and \
                     len(crit_grade_comments[crit]["comment"]) > 0:
                 form_data['rubric_assessment'][crit]["comments"] = \
                     crit_grade_comments[crit]["comment"]
         data = str.encode(json.dumps(form_data))
-        header = {"Authorization": "Bearer {}".format(self.canvas_key)}
+        header = {"Authorization": "Bearer {}".format(self.canvas_key),
+                  "Content-Type":"application/json"}
         return requests.put(url, data, headers=header)
 
 
@@ -191,6 +197,7 @@ commandline argument --canvas_url, (2) 2nd line in {}, \
 
     course_id = int(args.course)
     assignment_id = int(args.assignment)
+    global VERBOSE
     VERBOSE = args.verbose
 
     gp = GradePoster(
